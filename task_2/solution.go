@@ -39,9 +39,8 @@ const (
 )
 
 type rowsDto struct {
-	rows  []Row
-	start uint64
-	end   uint64
+	rows   []Row
+	offset uint64
 }
 
 // CopyTable копирует таблицу profiles из fromName в toName.
@@ -134,7 +133,7 @@ func runWriters(ctx context.Context, db Database, queue chan rowsDto) error {
 					return struct{}{}, db.SaveRows(ctx, rowsDto.rows)
 				})
 				if err != nil {
-					return fmt.Errorf("save rows [%d,%d): %w", rowsDto.start, rowsDto.end, err)
+					return fmt.Errorf("save rows [%d,%d): %w", rowsDto.offset, rowsDto.offset+batchSize, err)
 				}
 				return nil
 			})
@@ -168,9 +167,8 @@ func runReaders(ctx context.Context, db Database, offsetCh chan uint64, queueCh 
 					case <-ctx.Done():
 						return ctx.Err()
 					case queueCh <- rowsDto{
-						rows:  rows,
-						start: offset,
-						end:   offset + batchSize,
+						rows:   rows,
+						offset: offset,
 					}:
 					}
 				}
