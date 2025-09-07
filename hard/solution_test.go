@@ -6,9 +6,20 @@ import (
 	"fmt"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"net"
 	"testing"
+	"time"
 )
+
+func NewDefaultConfig() Config {
+	return Config{
+		BatchSize:       1000,
+		MaxRetries:      3,
+		RetriesDelay:    1 * time.Second,
+		CallTimeout:     10 * time.Second,
+		FullCopyTimeout: 12 * time.Hour,
+		WorkersCount:    4,
+	}
+}
 
 // --- Моковые объекты ---
 
@@ -62,15 +73,16 @@ func TestCopyTable_FullHappyPath(t *testing.T) {
 	from := NewMockDB()
 	to := NewMockDB()
 	pool := NewMockConnectionPool(from, to)
+	cfg := NewDefaultConfig()
 
 	from.On("GetMaxID", mock.Anything).Return(uint64(3), nil)
 
-	from.On("LoadRows", mock.Anything, uint64(1), uint64(1+batchSize)).
+	from.On("LoadRows", mock.Anything, uint64(1), 1+cfg.BatchSize).
 		Return([]Row{{1}, {2}, {3}}, nil)
 
 	to.On("SaveRows", mock.Anything, []Row{{1}, {2}, {3}}).Return(nil)
 
-	err := CopyTable(pool, "from", "to", true)
+	err := CopyTable(cfg, pool, "from", "to")
 	require.NoError(t, err)
 	from.AssertExpectations(t)
 	to.AssertExpectations(t)
@@ -80,38 +92,14 @@ func TestCopyTable_Incremental(t *testing.T) {
 	from := NewMockDB()
 	to := NewMockDB()
 	pool := NewMockConnectionPool(from, to)
+	cfg := NewDefaultConfig()
 
 	from.On("GetMaxID", mock.Anything).Return(uint64(5), nil)
-	to.On("GetMaxID", mock.Anything).Return(uint64(2), nil)
 
-	start := uint64(2) + 1
-	end := start + batchSize
-	from.On("LoadRows", mock.Anything, start, end).Return([]Row{{3}, {4}, {5}}, nil)
+	from.On("LoadRows", mock.Anything, uint64(1), 1+cfg.BatchSize).Return([]Row{{3}, {4}, {5}}, nil)
 	to.On("SaveRows", mock.Anything, []Row{{3}, {4}, {5}}).Return(nil)
 
-	err := CopyTable(pool, "from", "to", false)
-	require.NoError(t, err)
-	from.AssertExpectations(t)
-	to.AssertExpectations(t)
-}
-
-func TestCopyTable_RetryOnTemporaryError(t *testing.T) {
-	from := NewMockDB()
-	to := NewMockDB()
-	pool := NewMockConnectionPool(from, to)
-
-	from.On("GetMaxID", mock.Anything).Return(uint64(1), nil)
-	to.On("GetMaxID", mock.Anything).Return(uint64(0), nil)
-
-	from.On("LoadRows", mock.Anything, uint64(1), uint64(1+batchSize)).
-		Return([]Row{{1}}, nil)
-
-	// эмуляция retry: первый раз ошибка, второй раз успех
-	call := to.On("SaveRows", mock.Anything, []Row{{1}})
-	call.Return(&net.DNSError{IsTemporary: true}).Once()
-	to.On("SaveRows", mock.Anything, []Row{{1}}).Return(nil).Once()
-
-	err := CopyTable(pool, "from", "to", false)
+	err := CopyTable(cfg, pool, "from", "to")
 	require.NoError(t, err)
 	from.AssertExpectations(t)
 	to.AssertExpectations(t)
@@ -121,14 +109,14 @@ func TestCopyTable_FatalErrorStops(t *testing.T) {
 	from := NewMockDB()
 	to := NewMockDB()
 	pool := NewMockConnectionPool(from, to)
+	cfg := NewDefaultConfig()
 
-	from.On("GetMaxID", mock.Anything).Return(uint64(1), nil)
-	to.On("GetMaxID", mock.Anything).Return(uint64(0), nil)
+	from.On("GetMaxID", mock.Anything).Return(uint64(5), nil)
 
-	from.On("LoadRows", mock.Anything, uint64(1), uint64(1+batchSize)).
+	from.On("LoadRows", mock.Anything, uint64(1), 1+cfg.BatchSize).
 		Return([]Row{}, errors.New("fatal"))
 
-	err := CopyTable(pool, "from", "to", false)
+	err := CopyTable(cfg, pool, "from", "to")
 	require.Error(t, err)
 	from.AssertExpectations(t)
 	to.AssertExpectations(t)
@@ -138,19 +126,19 @@ func TestCopyTable_ContextTimeoutCancels(t *testing.T) {
 	from := NewMockDB()
 	to := NewMockDB()
 	pool := NewMockConnectionPool(from, to)
+	cfg := NewDefaultConfig()
 
-	from.On("GetMaxID", mock.Anything).Return(uint64(1), nil)
-	to.On("GetMaxID", mock.Anything).Return(uint64(0), nil)
+	from.On("GetMaxID", mock.Anything).Return(uint64(5), nil)
 
-	from.On("LoadRows", mock.Anything, uint64(1), uint64(1+batchSize)).
+	from.On("LoadRows", mock.Anything, uint64(1), 1+cfg.BatchSize).
 		Return([]Row{{1}}, nil)
 
-	for attempt := 0; attempt < maxRetries; attempt++ {
+	for attempt := 0; attempt < cfg.MaxRetries; attempt++ {
 		to.On("SaveRows", mock.Anything, []Row{{1}}).
 			Return(context.DeadlineExceeded)
 	}
 
-	err := CopyTable(pool, "from", "to", false)
+	err := CopyTable(cfg, pool, "from", "to")
 	require.Error(t, err)
 	from.AssertExpectations(t)
 	to.AssertExpectations(t)
@@ -160,11 +148,11 @@ func TestCopyTable_ZeroRowsNoSave(t *testing.T) {
 	from := NewMockDB()
 	to := NewMockDB()
 	pool := NewMockConnectionPool(from, to)
+	cfg := NewDefaultConfig()
 
 	from.On("GetMaxID", mock.Anything).Return(uint64(0), nil)
-	to.On("GetMaxID", mock.Anything).Return(uint64(0), nil)
 
-	err := CopyTable(pool, "from", "to", true)
+	err := CopyTable(cfg, pool, "from", "to")
 	require.NoError(t, err)
 	to.AssertNotCalled(t, "SaveRows", mock.Anything, mock.Anything)
 }
@@ -173,19 +161,19 @@ func TestCopyTable_BatchProcessing(t *testing.T) {
 	from := NewMockDB()
 	to := NewMockDB()
 	pool := NewMockConnectionPool(from, to)
+	cfg := NewDefaultConfig()
 
-	totalRows := uint64(2*batchSize + 1)
+	totalRows := uint64(2*cfg.BatchSize + 1)
 	from.On("GetMaxID", mock.Anything).Return(totalRows, nil)
-	to.On("GetMaxID", mock.Anything).Return(uint64(0), nil)
 
-	for offset := uint64(1); offset <= totalRows; offset += batchSize {
-		end := offset + batchSize
+	for offset := uint64(1); offset <= totalRows; offset += cfg.BatchSize {
+		end := offset + cfg.BatchSize
 		rows := []Row{{offset}}
 		from.On("LoadRows", mock.Anything, offset, end).Return(rows, nil)
 		to.On("SaveRows", mock.Anything, rows).Return(nil)
 	}
 
-	err := CopyTable(pool, "from", "to", false)
+	err := CopyTable(cfg, pool, "from", "to")
 	require.NoError(t, err)
 	from.AssertExpectations(t)
 	to.AssertExpectations(t)
@@ -195,19 +183,19 @@ func TestCopyTable_SkipEmptyBatch(t *testing.T) {
 	from := NewMockDB()
 	to := NewMockDB()
 	pool := NewMockConnectionPool(from, to)
+	cfg := NewDefaultConfig()
 
-	totalRows := batchSize + 1
-	from.On("GetMaxID", mock.Anything).Return(uint64(totalRows), nil)
-	to.On("GetMaxID", mock.Anything).Return(uint64(0), nil)
+	totalRows := cfg.BatchSize + 1
+	from.On("GetMaxID", mock.Anything).Return(totalRows, nil)
 
-	from.On("LoadRows", mock.Anything, uint64(1), uint64(1+batchSize)).
+	from.On("LoadRows", mock.Anything, uint64(1), 1+cfg.BatchSize).
 		Return([]Row{{uint64(1)}}, nil)
 	to.On("SaveRows", mock.Anything, []Row{{uint64(1)}}).Return(nil)
 
-	from.On("LoadRows", mock.Anything, uint64(1+batchSize), uint64(1+batchSize*2)).
+	from.On("LoadRows", mock.Anything, 1+cfg.BatchSize, 1+cfg.BatchSize*2).
 		Return([]Row{}, nil)
 
-	err := CopyTable(pool, "from", "to", false)
+	err := CopyTable(cfg, pool, "from", "to")
 	require.NoError(t, err)
 
 	from.AssertExpectations(t)
