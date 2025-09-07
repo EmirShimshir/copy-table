@@ -108,7 +108,7 @@ func TestCopyTable_RetryOnTemporaryError(t *testing.T) {
 
 	// эмуляция retry: первый раз ошибка, второй раз успех
 	call := to.On("SaveRows", mock.Anything, []Row{{1}})
-	call.Return(&net.DNSError{IsTemporary: true}).Once()
+	call.Return(&net.DNSError{IsTimeout: true}).Once()
 	to.On("SaveRows", mock.Anything, []Row{{1}}).Return(nil).Once()
 
 	err := CopyTable(pool, "from", "to", false)

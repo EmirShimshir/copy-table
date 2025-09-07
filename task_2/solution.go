@@ -38,7 +38,7 @@ const (
 	workerCount      = 4
 )
 
-type rowsDto struct {
+type batch struct {
 	rows   []Row
 	offset uint64
 }
@@ -85,7 +85,7 @@ func CopyTable(connPool ConnectionPool, fromName string, toName string, full boo
 	}
 
 	offsetCh := make(chan uint64, 2*workerCount)
-	batchQueue := make(chan rowsDto, 2*workerCount)
+	batchQueue := make(chan batch, 2*workerCount)
 
 	groupMain, ctx := errgroup.WithContext(ctx)
 
@@ -116,7 +116,7 @@ func runOffsetsGenerator(ctx context.Context, startID uint64, maxID uint64, ch c
 	return nil
 }
 
-func runWriters(ctx context.Context, db Database, queue chan rowsDto) error {
+func runWriters(ctx context.Context, db Database, queue chan batch) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(workerCount)
 
@@ -141,7 +141,7 @@ func runWriters(ctx context.Context, db Database, queue chan rowsDto) error {
 	}
 }
 
-func runReaders(ctx context.Context, db Database, offsetCh chan uint64, queueCh chan rowsDto) error {
+func runReaders(ctx context.Context, db Database, offsetCh chan uint64, queueCh chan batch) error {
 	defer close(queueCh)
 
 	g, ctx := errgroup.WithContext(ctx)
@@ -166,7 +166,7 @@ func runReaders(ctx context.Context, db Database, offsetCh chan uint64, queueCh 
 					select {
 					case <-ctx.Done():
 						return ctx.Err()
-					case queueCh <- rowsDto{
+					case queueCh <- batch{
 						rows:   rows,
 						offset: offset,
 					}:
@@ -214,7 +214,7 @@ func isTemporary(err error) bool {
 		return true
 	}
 	var ne net.Error
-	if errors.As(err, &ne) && (ne.Timeout() || ne.Temporary()) {
+	if errors.As(err, &ne) && (ne.Timeout()) {
 		return true
 	}
 	return false
