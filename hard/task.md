@@ -30,32 +30,43 @@
 
 ## Стартовый шаблон:
 ```golang
+package main
+
+import (
+  "context"
+  "io"
+)
+
 type Row []interface{}
 
 type Database interface {
-// реализация интерфейса Database умеет переустанавливать подключения
-// вызов SaveRows идемпотентен
+  // реализация интерфейса Database умеет переустанавливать подключения
+  // вызов SaveRows идемпотентен
 
-    io.Closer
-    GetMaxID(ctx context.Context) (uint64, error)
-    LoadRows(ctx context.Context, minID, maxID uint64) ([]Row, error)  // [minID, maxID)
-    SaveRows(ctx context.Context, rows []Row) error
+  io.Closer
+  GetMaxID(ctx context.Context) (uint64, error)
+  LoadRows(ctx context.Context, minID, maxID uint64) ([]Row, error) // [minID, maxID)
+  SaveRows(ctx context.Context, rows []Row) error
 }
 
 type ConnectionPool interface {
-    Connect(ctx context.Context, dbname string) (Database, error)
+  Connect(ctx context.Context, dbname string) (Database, error)
 }
 
-const (
-  batchSize = ... // размер одного батча (обязательно)
-  maxRetries = ... // максимальное количество ретраев (обязательно, не больше 3, чтобы немного ждать при тестах)
-  ...
-)
-
-// CopyTable
-// Если full=false то продолжить переливку данных с места прошлой ошибки
-// Если full=true - то перелить все данные
-func CopyTable(connPool ConnectionPool, fromName string, toName string) error {
-// ... your code
+/*
+type Config struct {
+	BatchSize       uint64 			// размер батча
+	MaxRetries      int 			// максимальное количество retry-ев
+	RetriesDelay    time.Duration 	// время ожидания между retry-ями
+	CallTimeout     time.Duration 	// максимальное время выполнения запроса к бд
+	FullCopyTimeout time.Duration 	// максимальное время выполнения функции CopyTable
+	WorkersCount    int 			// максимальное количество worker-ов
 }
+*/
+
+// CopyTable копирует таблицу profiles из fromName в toName.
+func CopyTable(cfg Config, connPool ConnectionPool, fromName string, toName string) error {
+  // ... your code
+}
+
 ```
