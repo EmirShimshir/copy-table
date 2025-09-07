@@ -147,7 +147,7 @@ func callWithRetry[T any](ctx context.Context, cfg Config, fn func(ctx context.C
 		cancel() // defer писать нельзя, так как создаем локальный контекст в цикле!
 		if err != nil {
 			if isTemporary(err) {
-				select { // ждем в select, так как RetriesDelay потенциально может быть долгим
+				select { // ждем в select, так как RetriesDelay может быть большим
 				case <-ctx.Done():
 					return zero, ctx.Err()
 				default:
