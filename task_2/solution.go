@@ -116,31 +116,6 @@ func runOffsetsGenerator(ctx context.Context, startID uint64, maxID uint64, ch c
 	return nil
 }
 
-func runWriters(ctx context.Context, db Database, queue chan batch) error {
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(workerCount)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case rowsDto, ok := <-queue:
-			if !ok {
-				return g.Wait()
-			}
-			g.Go(func() error {
-				_, err := callWithRetry(ctx, func(ctx context.Context) (struct{}, error) {
-					return struct{}{}, db.SaveRows(ctx, rowsDto.rows)
-				})
-				if err != nil {
-					return fmt.Errorf("save rows [%d,%d): %w", rowsDto.offset, rowsDto.offset+batchSize, err)
-				}
-				return nil
-			})
-		}
-	}
-}
-
 func runReaders(ctx context.Context, db Database, offsetCh chan uint64, queueCh chan batch) error {
 	defer close(queueCh)
 
@@ -171,6 +146,31 @@ func runReaders(ctx context.Context, db Database, offsetCh chan uint64, queueCh 
 						offset: offset,
 					}:
 					}
+				}
+				return nil
+			})
+		}
+	}
+}
+
+func runWriters(ctx context.Context, db Database, queue chan batch) error {
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(workerCount)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case rowsDto, ok := <-queue:
+			if !ok {
+				return g.Wait()
+			}
+			g.Go(func() error {
+				_, err := callWithRetry(ctx, func(ctx context.Context) (struct{}, error) {
+					return struct{}{}, db.SaveRows(ctx, rowsDto.rows)
+				})
+				if err != nil {
+					return fmt.Errorf("save rows [%d,%d): %w", rowsDto.offset, rowsDto.offset+batchSize, err)
 				}
 				return nil
 			})
