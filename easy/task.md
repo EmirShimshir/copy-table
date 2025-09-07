@@ -57,7 +57,6 @@ MaxRetries      int           // максимальное количество r
 RetriesDelay    time.Duration // задержка между retry
 CallTimeout     time.Duration // таймаут выполнения одного запроса
 FullCopyTimeout time.Duration // таймаут всей операции копирования
-WorkersCount    int           // количество одновременно работающих читателей и писателей
 }
 ```
 
